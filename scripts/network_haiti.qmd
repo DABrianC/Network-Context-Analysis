@@ -1,0 +1,242 @@
+---
+title: "Capacity Strengthening network, Haiti"
+subtitle: "Contextual understanding of network"
+author: "Brian Calhoon"
+format: 
+  html:
+    toc: true
+    echo: false
+---
+
+```{r echo = FALSE, output = FALSE}
+
+#Run a prep script that includes necessary packages and some formatting thingies
+source(here::here("prep/prep.R"))
+source(here::here("prep/clean_data.R"))
+```
+
+# Introduction
+
+This is an anonymized version of a network analysis to understand better the context in which an analytical skills capacity building network exists. The individuals and locations presented here are not real. This effort consists of baseline data collection using a survey that asked about current skills and who individuals already reach out to for mentoring.
+
+First, we will look at the different statistical and software skills, and then we will analyze the informal mentoring network. To help us make sense of the network statistics, we will simulate similar networks to help us understand the statistics in context. Next year we will have year-on-year comparison data to help us understand how the network is adapting and evolving. 
+
+Our participants come from Port-au_Prince, St. Marc, and Cap Haitian in Haiti.
+
+```{r echo = FALSE, warning = FALSE} 
+
+ggplot(hti) +
+  geom_sf(fill = my_pal[[15]]) +
+  geom_sf(data = nodes_sf
+          , aes(geometry = st_jitter(geometry
+                                     , amount = .05))
+          , alpha = .8
+          , color = my_pal[[1]]) +
+  geom_sf_text(data = nodes_sf
+               , aes(label = name
+                     , st_jitter(geometry
+                                 , amount = 1))
+               , color = my_pal[[5]]
+               , alpha = .7)+
+  labs(title = "Haiti: Locations of Capacity Building Participants"
+       , subtitle = "Round 1 data collection, 2021") +
+  theme_void()
+
+
+```
+# Summary Statistics
+  
+We received `r nrow(nodes3)` responses to the survey with `r nrow(nodes3[nodes3$name=="Port-au-Prince",])` responses from participants in Port-au-Prince, `r nrow(nodes3[nodes3$name=="St. Marc",])` responses from participants in St. Marc, and `r nrow(nodes3[nodes3$name=="Cap Haitian",])` responses from participants in Cap Haitian. 
+
+```{r warning=FALSE}
+
+
+#identifying the analytic softwares used at MSI
+
+#find the individual softwares
+softwares <- paste(c("R", "Stata", "SPSS", "Spss", "Nvivo", "Qualtrics", "MaxQDA"
+                     , "Python", "ArcGIS", "Excel", "excel", "SAS"
+                     , "EpiInfo", "STATA", "Kobo Tool Box", "Dedoose"
+                     , "SMath Studio", "Tableau"), collapse = "|")
+
+
+#unnest the software column so we can make a count of softwares
+softwares <- unnest(nodes3, software)
+
+#then create a count of which software packages are used at MSI
+sw_count <- softwares |>
+  filter(!is.na(software)) |>
+  group_by(software) |>
+  count() |>
+  arrange(desc(n))
+
+
+ggplot(data = sw_count
+       , aes(reorder(factor(software), -n), n)) +
+  geom_point(size = 14, color = my_pal[[2]]) +
+  geom_segment(aes(x = factor(sw_count$software), xend = factor(sw_count$software) 
+               , y = 0, yend = sw_count$n)
+               , linewidth = 2
+               , color = my_pal[[2]]
+               , alpha = .7) +
+  geom_text(aes(x = software, y = n, label = n)
+            , color = "white") +
+  labs(title = "Most used analytic software packages"
+       , subtitle = "Excel, R, and Stata are the most commonly used."
+       , y = "Number of staff"
+       , x = "Software") + 
+  scale_y_continuous(limits = c(0, 10))+
+  theme.plot() +
+  theme(axis.text.x=element_text(hjust=0.5))
+
+```
+
+# Networks 
+To better understand the network it helps to visualize it. This network has `r gorder(g_mentor)` nodes and `r gsize(g_mentor)` edges. 
+
+
+```{r echo = FALSE, output = TRUE, warning = FALSE }
+#use the g_mentor graph object to visualize our network
+ggraph(g_mentor, layout = "with_kk") +
+  geom_edge_link(color = my_pal[[5]]
+                 , alpha = .3) +
+  geom_node_point(color = my_pal[[5]]
+                  , size = 8) +
+  geom_node_text(aes(label = name)
+                 , color = "white")+
+  labs(title = "Capacity building network participants") +
+  theme(legend.position = "none")+
+  theme.graph()
+```
+
+
+
+### Network statistics
+
+How do these statistics compare with what we would expect from similar networks? We can run some simulations to find out. To do this, we set up network parameters with the same number of nodes and the same density, and then we simulate 1000 networks. 
+
+
+```{r}
+#Calculate some network statistics - density, mean distance, betweeness, transitivity, and eigenvector centrality
+#calculate the network density
+density_ment <- edge_density(g_mentor)
+#calculate the mean_distance
+avg_dist_ment <- mean_distance(g_mentor, directed = FALSE)
+#calculate the betweeness
+b1 <- betweenness(g_mentor, directed = FALSE)
+between_ment <- mean(b1)
+#eigenvalues vector
+e1 <- eigen_centrality(g_mentor, directed =FALSE)$vector
+#calculate avg. eigenvalue of the network
+eigen_ment <- mean(e1)
+l <- c("Network", "Avg. Density", "Avg. Distance", "Avg. Betweenness", "Avg. Eigenvector")
+m <- c("Mentorship", density_ment, avg_dist_ment, between_ment, eigen_ment)
+dat <- data.frame(l, m)
+dat1 <- pivot_wider(data = dat
+                    , names_from = l
+                    , values_from = m) |>
+  mutate(across(2:5, as.numeric))
+
+#graph statistics table
+network_table <- flextable(dat1) |>
+  #set_header_labels(values = dat1) |> 
+  align(align = "center", part = "all") |>
+  colformat_double(digits = 2)
+
+network_table
+
+
+```
+Without any comparison these statistics probably do not mean much. So, we should run some comparison statistics using 1000 simulated networks that are similar in make up to the capacity building network.
+
+```{r}
+#simulation of mentorship network 1000x
+gl <- vector('list', 1000)
+
+for(i in 1:1000){
+  gl[[i]] <- erdos.renyi.game(
+    n = gorder(g_mentor)
+    , p.or.m = edge_density(g_mentor)
+    , type = "gnp"
+  )
+}
+
+#Then use the gl object to calculate averages for each of the stats presented above on the original two networks.
+
+gl_ment_avg_density <- mean(unlist(lapply(gl, edge_density)))
+gl_ment_avg_dist <- mean(unlist(lapply(gl, mean_distance, directed = FALSE)))
+gl_ment_avg_between <- mean(unlist(lapply(gl, betweenness)))
+
+
+#This one takes a few more steps 
+gl_eigen_ment <- do.call(rbind, lapply(gl, eigen_centrality, directed = FALSE)) |>
+  #do.call(rbind, .data) |>
+  data.frame() 
+
+gl_ment_avg_eigen <- mean(unlist(gl_eigen_ment$vector))
+
+
+#make a flextable
+names <- c("Network", "Avg. Density", "Avg. Distance", "Avg. Betweenness", "Avg. Eigenvector")
+
+dat_ment <- c("Mentorship", density_ment, avg_dist_ment,  between_ment, eigen_ment)
+
+sim_ment <- c("Simulated Mentorship", gl_ment_avg_density, gl_ment_avg_dist, gl_ment_avg_between, gl_ment_avg_eigen)
+
+
+dat_all <- data.frame(names, dat_ment, sim_ment)
+
+dat_all1 <- t(dat_all) |>
+  data.frame()
+
+names(dat_all1) <- dat_all1[1,]
+
+dat_all2 <- dat_all1[2:5,] |>
+  mutate(across(2:5, as.numeric))
+
+network_table2 <- flextable(dat_all2) |>
+    set_header_labels(values = names(dat_all2)) |>
+    align(align = "center", part = "all") |>
+    colformat_double(digits = 2) |>
+    italic(i = c(2,4)) |>
+    bold(i = c(1,3))
+
+network_table2
+
+```
+
+Now we can see that our network is a little less dense and nodes are a little farther apart. In addition, there is a high average value for betweenness in our network due to a few nodes being the "gatekeepers" to the rest of the nodes. The average Eignevector is also slightly higher meaning that each node has a slightly higher influence than the expected average node in a similar network.
+
+To help explain what this means below are one plot that shows our network (the red line) compared to the distribution of simulated networks for average distance between connections.
+
+```{r, warning = FALSE}
+#One example plotted to show what's happening
+gl.apls = unlist(lapply(gl, mean_distance, directed=FALSE))
+
+ggplot(data = as.data.frame(gl.apls)) +
+  geom_histogram(aes(x = gl.apls), bins = 25
+                 , fill = my_pal[[11]]
+                 , alpha = .4) +
+  geom_vline(xintercept = avg_dist_ment
+             , linewidth = 1
+             , linetype = "dashed"
+             , color = my_pal[[14]]) +
+  annotate(x = avg_dist_ment + 1.2, y = 135, label = glue::glue("{round(avg_dist_ment, digits = 2)}, is the average distance \nbetween connections \nin the mentoring network"), geom = "label", color = my_pal[[14]]) +
+  geom_segment(aes(x = avg_dist_ment + .6, y = 145, xend = avg_dist_ment +.05, yend = 138),
+                  arrow = arrow(length = unit(0.25, "cm"))
+               , linewidth = 1
+               , color = my_pal[[14]])+
+  labs(y = "# of simulations"
+       , x = "Average distance between connections"
+       , title = "How does our mentorship network compare to \nsimilarly structured networks?"
+       , subtitle = glue::glue("{mean(gl.apls < avg_dist_ment) * 100}", "% ", "of similar networks have a shorter average distance between \nconnections than the mentoring network"))+
+  theme.plot()
+
+
+```
+
+
+
+
+
+
